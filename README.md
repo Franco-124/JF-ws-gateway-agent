@@ -61,6 +61,12 @@ docker build -t ws-gateway .
 docker run -p 8000:8000 --env-file .env ws-gateway
 ```
 
+## Crear tablas en Supabase
+
+```
+uv run python scripts/create_supabase_tables.py
+```
+
 ## Endpoints
 
 - GET `/webhook` : verificacion del webhook de WhatsApp

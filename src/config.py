@@ -1,7 +1,9 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+_base_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_base_dir)
+load_dotenv(os.path.join(_project_root, ".env"))
 
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
