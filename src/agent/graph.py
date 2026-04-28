@@ -8,8 +8,10 @@ from agent.state import AgentState
 from agent.tools import tools
 from agent.prompt import SYSTEM_PROMPT
 
+MODEL_ID = "gpt-4.1-mini"
+
 _model = ChatOpenAI(
-    model="gpt-4.1-mini",
+    model=MODEL_ID,
     api_key=OPENAI_API_KEY,
 ).bind_tools(tools)
 
@@ -17,7 +19,8 @@ _model = ChatOpenAI(
 def _call_model(state: AgentState) -> dict:
     messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
     response = _model.invoke(messages)
-    return {"messages": [response]}
+    token_usage = getattr(response, "usage_metadata", None)
+    return {"messages": [response], "token_usage": token_usage, "model_id": MODEL_ID}
 
 
 def _should_continue(state: AgentState) -> str:

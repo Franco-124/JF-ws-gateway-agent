@@ -1,16 +1,33 @@
 import logging
+import uuid
 from fastapi import APIRouter, Request, Response
 from agent.graph import graph
 from whatsapp.client import send_message, mark_as_read
+from storage.conversation_log import log_message
+from storage.conversation_history import fetch_conversation_messages
 from config import VERIFY_TOKEN
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _invoke_agent(message: str) -> str:
-    result = graph.invoke({"messages": [{"role": "user", "content": message}]})
-    return result["messages"][-1].content
+def _build_conversation_id(phone_number: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"whatsapp:{phone_number}"))
+
+
+def _invoke_agent(message: str, conversation_id: str) -> tuple[str, dict, str]:
+    history = fetch_conversation_messages(conversation_id)
+    prior_messages = [
+        {"role": "user" if item["direction"] == "in" else "assistant", "content": item["body"]}
+        for item in history
+        if item.get("direction") in {"in", "out"}
+    ]
+    payload = {"messages": prior_messages + [{"role": "user", "content": message}]}
+    result = graph.invoke(payload)
+    content = result["messages"][-1].content
+    token_usage = result.get("token_usage") or {}
+    model_id = result.get("model_id") or "unknown"
+    return content, token_usage, model_id
 
 
 @router.get("/webhook")
@@ -45,12 +62,32 @@ async def handle_messages(request: Request):
         number = message["from"]
         message_id = message["id"]
         text = message["text"]["body"]
+        conversation_id = _build_conversation_id(number)
 
         logger.info(f"Mensaje de {number}: {text}")
 
         mark_as_read(message_id)
-        respuesta = _invoke_agent(text)
+        log_message(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            wa_number=number,
+            direction="in",
+            body=text,
+        )
+
+        respuesta, token_usage, model_id = _invoke_agent(text, conversation_id)
         send_message(number, respuesta)
+        log_message(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            wa_number=number,
+            direction="out",
+            body=respuesta,
+            model_id=model_id,
+            prompt_tokens=token_usage.get("input_tokens"),
+            completion_tokens=token_usage.get("output_tokens"),
+            total_tokens=token_usage.get("total_tokens"),
+        )
 
     except Exception as e:
         logger.error(f"Error procesando mensaje: {e}")

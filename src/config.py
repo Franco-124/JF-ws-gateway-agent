@@ -13,3 +13,8 @@ FACEBOOK_BASE_URL = os.getenv("FACEBOOK_BASE_URL")
 CLICK_UP_API_TOKEN = os.getenv("CLICK_UP_API_TOKEN")
 CLICK_UP_BASE_URL = os.getenv("CLICK_UP_BASE_URL", "https://api.clickup.com/api/v2")
 CLICKUP_LIST_ID = os.getenv("CLICKUP_LIST_ID")
+
+# Supabase settings used by agent tools
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+DATABASE_URL = os.getenv("DATABASE_URL")
