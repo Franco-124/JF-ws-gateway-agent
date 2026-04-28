@@ -17,7 +17,18 @@ _model = ChatOpenAI(
 
 
 def _call_model(state: AgentState) -> dict:
-    messages = [SystemMessage(content=SYSTEM_PROMPT)] + state["messages"]
+    messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    conversation_id = state.get("conversation_id")
+    if conversation_id:
+        messages.append(
+            SystemMessage(
+                content=(
+                    "ID de conversacion actual: "
+                    f"{conversation_id}. Usa este id al llamar la tool close_conversation_tool."
+                )
+            )
+        )
+    messages += state["messages"]
     response = _model.invoke(messages)
     token_usage = getattr(response, "usage_metadata", None)
     return {"messages": [response], "token_usage": token_usage, "model_id": MODEL_ID}

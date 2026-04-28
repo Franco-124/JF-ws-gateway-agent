@@ -1,19 +1,15 @@
 import logging
-import uuid
 from fastapi import APIRouter, Request, Response
 from agent.graph import graph
 from whatsapp.client import send_message, mark_as_read
 from storage.conversation_log import log_message
 from storage.conversation_history import fetch_conversation_messages
 from storage.message_dedup import register_message_id
+from storage.conversations import get_or_create_conversation
 from config import VERIFY_TOKEN
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-def _build_conversation_id(phone_number: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"whatsapp:{phone_number}"))
 
 
 def _invoke_agent(message: str, conversation_id: str) -> tuple[str, dict, str]:
@@ -24,7 +20,7 @@ def _invoke_agent(message: str, conversation_id: str) -> tuple[str, dict, str]:
         if item.get("direction") in {"in", "out"}
     ]
     payload = {"messages": prior_messages + [{"role": "user", "content": message}]}
-    result = graph.invoke(payload)
+    result = graph.invoke({**payload, "conversation_id": conversation_id})
     content = result["messages"][-1].content
     token_usage = result.get("token_usage") or {}
     model_id = result.get("model_id") or "unknown"
@@ -63,7 +59,7 @@ async def handle_messages(request: Request):
         number = message["from"]
         message_id = message["id"]
         text = message["text"]["body"]
-        conversation_id = _build_conversation_id(number)
+        conversation_id = get_or_create_conversation(number)
 
         if not register_message_id(message_id, number):
             return Response(content="EVENT_RECEIVED", status_code=200)

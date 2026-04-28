@@ -25,6 +25,18 @@ create table if not exists message_logs (
 create index if not exists message_logs_conversation_id_idx
   on message_logs (conversation_id, created_at);
 
+create table if not exists conversations (
+  id uuid primary key default gen_random_uuid(),
+  wa_number text not null,
+  status text not null check (status in ('open','closed')),
+  closed_reason text,
+  created_at timestamptz default now(),
+  closed_at timestamptz
+);
+
+create index if not exists conversations_wa_status_idx
+  on conversations (wa_number, status, created_at);
+
 create table if not exists message_dedup (
   message_id text primary key,
   wa_number text not null,

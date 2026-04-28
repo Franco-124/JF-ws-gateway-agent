@@ -7,3 +7,4 @@ class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     token_usage: Optional[Dict]
     model_id: Optional[str]
+    conversation_id: Optional[str]

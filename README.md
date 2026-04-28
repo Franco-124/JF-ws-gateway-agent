@@ -76,7 +76,7 @@ uv run python scripts/create_supabase_tables.py
 
 Se registra el historial en la tabla `message_logs`, se guarda el consumo de tokens
 del modelo por cada respuesta y se utiliza `message_dedup` para evitar procesar
-mensajes duplicados.
+mensajes duplicados. Las conversaciones activas se manejan en `conversations`.
 
 Schema sugerido para `message_logs`:
 
@@ -99,6 +99,18 @@ create table if not exists message_logs (
 create index if not exists message_logs_conversation_id_idx
   on message_logs (conversation_id, created_at);
 
+create table if not exists conversations (
+  id uuid primary key default gen_random_uuid(),
+  wa_number text not null,
+  status text not null check (status in ('open','closed')),
+  closed_reason text,
+  created_at timestamptz default now(),
+  closed_at timestamptz
+);
+
+create index if not exists conversations_wa_status_idx
+  on conversations (wa_number, status, created_at);
+
 create table if not exists message_dedup (
   message_id text primary key,
   wa_number text not null,
@@ -107,6 +119,17 @@ create table if not exists message_dedup (
 
 create index if not exists message_dedup_created_at_idx
   on message_dedup (created_at);
+
+## ClickUp
+
+Las tools de ClickUp aceptan parametros opcionales para mayor precision:
+
+- `create_task(name, description, due_date, priority, list_id)`
+- `update_task(task_id, name, description, status, due_date, priority)`
+
+Notas:
+- `due_date` acepta ISO 8601 (YYYY-MM-DD o YYYY-MM-DDTHH:MM:SS) o epoch ms.
+- `priority` acepta 1-4.
 ```
 
 ## Flujo principal
