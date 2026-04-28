@@ -5,6 +5,7 @@ from agent.graph import graph
 from whatsapp.client import send_message, mark_as_read
 from storage.conversation_log import log_message
 from storage.conversation_history import fetch_conversation_messages
+from storage.message_dedup import register_message_id
 from config import VERIFY_TOKEN
 
 router = APIRouter()
@@ -63,6 +64,9 @@ async def handle_messages(request: Request):
         message_id = message["id"]
         text = message["text"]["body"]
         conversation_id = _build_conversation_id(number)
+
+        if not register_message_id(message_id, number):
+            return Response(content="EVENT_RECEIVED", status_code=200)
 
         logger.info(f"Mensaje de {number}: {text}")
 

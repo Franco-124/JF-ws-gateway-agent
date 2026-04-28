@@ -74,8 +74,9 @@ uv run python scripts/create_supabase_tables.py
 
 ## Supabase
 
-Se registra el historial en la tabla `message_logs` y se guarda el consumo de tokens
-del modelo por cada respuesta. El historial se usa para reconstruir el contexto.
+Se registra el historial en la tabla `message_logs`, se guarda el consumo de tokens
+del modelo por cada respuesta y se utiliza `message_dedup` para evitar procesar
+mensajes duplicados.
 
 Schema sugerido para `message_logs`:
 
@@ -97,6 +98,15 @@ create table if not exists message_logs (
 
 create index if not exists message_logs_conversation_id_idx
   on message_logs (conversation_id, created_at);
+
+create table if not exists message_dedup (
+  message_id text primary key,
+  wa_number text not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists message_dedup_created_at_idx
+  on message_dedup (created_at);
 ```
 
 ## Flujo principal

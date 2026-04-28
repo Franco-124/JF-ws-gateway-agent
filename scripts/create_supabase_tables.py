@@ -24,6 +24,15 @@ create table if not exists message_logs (
 
 create index if not exists message_logs_conversation_id_idx
   on message_logs (conversation_id, created_at);
+
+create table if not exists message_dedup (
+  message_id text primary key,
+  wa_number text not null,
+  created_at timestamptz default now()
+);
+
+create index if not exists message_dedup_created_at_idx
+  on message_dedup (created_at);
 """
 
 
