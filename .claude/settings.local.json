@@ -7,7 +7,8 @@
       "Bash(pip3 install *)",
       "Bash(rm -rf venv)",
       "Bash(python -m virtualenv venv)",
-      "Bash(uv sync *)"
+      "Bash(uv sync *)",
+      "Bash(uv run *)"
     ]
   }
 }

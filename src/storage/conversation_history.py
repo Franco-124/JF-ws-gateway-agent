@@ -8,32 +8,20 @@ logger = logging.getLogger(__name__)
 
 def fetch_conversation_messages(
     conversation_id: str,
-    limit_per_direction: int = 2,
+    limit: int = 20,
 ) -> List[Dict]:
     client = get_supabase_client()
     try:
-        inbound = (
+        result = (
             client.table("message_logs")
             .select("direction, body, created_at")
             .eq("conversation_id", conversation_id)
-            .eq("direction", "in")
             .order("created_at", desc=True)
-            .limit(limit_per_direction)
+            .limit(limit)
             .execute()
         )
-        outbound = (
-            client.table("message_logs")
-            .select("direction, body, created_at")
-            .eq("conversation_id", conversation_id)
-            .eq("direction", "out")
-            .order("created_at", desc=True)
-            .limit(limit_per_direction)
-            .execute()
-        )
-
-        combined = (inbound.data or []) + (outbound.data or [])
-        combined.sort(key=lambda item: item.get("created_at") or "")
-        return [{"direction": item["direction"], "body": item["body"]} for item in combined]
+        messages = sorted(result.data or [], key=lambda x: x.get("created_at") or "")
+        return [{"direction": m["direction"], "body": m["body"]} for m in messages]
     except Exception as exc:
         logger.error(f"No se pudo obtener historial de Supabase: {exc}")
         return []

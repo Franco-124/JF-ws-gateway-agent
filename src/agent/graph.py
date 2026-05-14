@@ -1,3 +1,4 @@
+from datetime import datetime, timezone, timedelta
 from langchain_openai import ChatOpenAI
 from config import OPENAI_API_KEY
 from langchain_core.messages import SystemMessage
@@ -16,8 +17,14 @@ _model = ChatOpenAI(
 ).bind_tools(tools)
 
 
+def _now_colombia() -> str:
+    colombia = timezone(timedelta(hours=-5))
+    return datetime.now(colombia).strftime("%Y-%m-%d %H:%M (Colombia, UTC-5, %A)")
+
+
 def _call_model(state: AgentState) -> dict:
     messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    messages.append(SystemMessage(content=f"Fecha y hora actual: {_now_colombia()}."))
     conversation_id = state.get("conversation_id")
     if conversation_id:
         messages.append(
