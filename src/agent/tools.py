@@ -40,12 +40,13 @@ def create_reminder(description: str, scheduled_at: str, follow_up_minutes: int)
                       Ej: "2025-05-14T15:00:00". Siempre confirma AM/PM antes de llamar.
         follow_up_minutes: Minutos después del disparo inicial para el follow-up si no confirma.
     """
+    print(f"[TOOL INVOKED] create_reminder description={description}", flush=True)
     try:
         wa_number = config.WA_NUMBER
-        logger.info("create_reminder called — wa_number=%s scheduled_at=%s follow_up_minutes=%s", wa_number, scheduled_at, follow_up_minutes)
+        print(f"[create_reminder] wa_number={wa_number} scheduled_at={scheduled_at} follow_up_minutes={follow_up_minutes}", flush=True)
         scheduled_utc = _colombia_to_utc(scheduled_at)
         follow_up_utc = scheduled_utc + timedelta(minutes=follow_up_minutes)
-        logger.info("Parsed times — scheduled_utc=%s follow_up_utc=%s", scheduled_utc, follow_up_utc)
+        print(f"[create_reminder] scheduled_utc={scheduled_utc} follow_up_utc={follow_up_utc}", flush=True)
 
         reminder_id = _create_reminder(
             wa_number=wa_number,
@@ -58,15 +59,16 @@ def create_reminder(description: str, scheduled_at: str, follow_up_minutes: int)
         scheduled_local = scheduled_utc.astimezone(colombia_tz).strftime("%I:%M %p")
         followup_local = follow_up_utc.astimezone(colombia_tz).strftime("%I:%M %p")
 
-        logger.info("Reminder created: %s", reminder_id)
+        print(f"[create_reminder] created id={reminder_id}", flush=True)
         return (
             f"Reminder creado (ID: {reminder_id}). "
             f"Te pregunto a las {scheduled_local}; "
             f"si no confirmás, vuelvo a preguntar a las {followup_local}."
         )
     except Exception as exc:
+        print(f"[create_reminder] ERROR {type(exc).__name__}: {exc}", flush=True)
         logger.error("Error creating reminder — %s: %s", type(exc).__name__, exc, exc_info=True)
-        return "No pude crear el reminder. Intentá de nuevo."
+        return f"ERROR al crear reminder: {type(exc).__name__}: {exc}"
 
 
 @tool

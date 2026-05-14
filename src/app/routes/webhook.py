@@ -26,6 +26,7 @@ def _build_reminder_context(pending: list[dict]) -> str:
 
 
 def _invoke_agent(message: str, conversation_id: str, wa_number: str) -> tuple[str, dict, str]:
+    print(f"[WEBHOOK] _invoke_agent called — message={message!r}", flush=True)
     history = fetch_conversation_messages(conversation_id)
     prior_messages = [
         {"role": "user" if item["direction"] == "in" else "assistant", "content": item["body"]}
