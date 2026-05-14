@@ -13,7 +13,6 @@ from storage.reminders import (
 import config
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # UTC-5 offset for Colombia (Bogotá)
 _COLOMBIA_OFFSET = timedelta(hours=-5)
@@ -21,12 +20,13 @@ _COLOMBIA_OFFSET = timedelta(hours=-5)
 
 def _colombia_to_utc(iso_colombia: str) -> datetime:
     """Parse ISO 8601 datetime in Colombia time (UTC-5) and return UTC datetime."""
-    naive = datetime.fromisoformat(iso_colombia.strip())
+    try:
+        naive = datetime.fromisoformat(iso_colombia.strip())
+    except ValueError as exc:
+        raise ValueError(f"Formato de fecha inválido '{iso_colombia}'. Usá ISO 8601, ej: '2025-05-14T15:00:00'") from exc
+
     colombia_tz = timezone(_COLOMBIA_OFFSET)
-    if naive.tzinfo is None:
-        aware = naive.replace(tzinfo=colombia_tz)
-    else:
-        aware = naive
+    aware = naive.replace(tzinfo=colombia_tz) if naive.tzinfo is None else naive
     return aware.astimezone(timezone.utc)
 
 
@@ -37,16 +37,18 @@ def create_reminder(description: str, scheduled_at: str, follow_up_minutes: int)
     Args:
         description: Qué debe recordar el usuario. Ej: "enviar el presupuesto".
         scheduled_at: Hora del recordatorio en formato ISO 8601, hora Colombia (UTC-5).
-                      Ej: "2025-05-14T15:00:00". Siempre confirma AM/PM antes de llamar.
-        follow_up_minutes: Minutos después del disparo inicial para el follow-up si no confirma.
+                      Ej: "2025-05-14T15:00:00". Confirmá AM/PM si es ambiguo.
+        follow_up_minutes: Minutos después del disparo inicial para el follow-up. Default: 30.
     """
-    print(f"[TOOL INVOKED] create_reminder description={description}", flush=True)
+    logger.info("[create_reminder] called — description=%r scheduled_at=%s follow_up_minutes=%s", description, scheduled_at, follow_up_minutes)
     try:
         wa_number = config.WA_NUMBER
-        print(f"[create_reminder] wa_number={wa_number} scheduled_at={scheduled_at} follow_up_minutes={follow_up_minutes}", flush=True)
+        if not wa_number:
+            raise ValueError("WA_NUMBER no está configurado en las variables de entorno")
+
         scheduled_utc = _colombia_to_utc(scheduled_at)
         follow_up_utc = scheduled_utc + timedelta(minutes=follow_up_minutes)
-        print(f"[create_reminder] scheduled_utc={scheduled_utc} follow_up_utc={follow_up_utc}", flush=True)
+        logger.info("[create_reminder] times — scheduled_utc=%s follow_up_utc=%s", scheduled_utc, follow_up_utc)
 
         reminder_id = _create_reminder(
             wa_number=wa_number,
@@ -59,32 +61,33 @@ def create_reminder(description: str, scheduled_at: str, follow_up_minutes: int)
         scheduled_local = scheduled_utc.astimezone(colombia_tz).strftime("%I:%M %p")
         followup_local = follow_up_utc.astimezone(colombia_tz).strftime("%I:%M %p")
 
-        print(f"[create_reminder] created id={reminder_id}", flush=True)
+        logger.info("[create_reminder] success — id=%s", reminder_id)
         return (
             f"Reminder creado (ID: {reminder_id}). "
             f"Te pregunto a las {scheduled_local}; "
             f"si no confirmás, vuelvo a preguntar a las {followup_local}."
         )
+    except ValueError as exc:
+        logger.error("[create_reminder] validation error — %s", exc)
+        return f"No pude crear el reminder: {exc}"
     except Exception as exc:
-        print(f"[create_reminder] ERROR {type(exc).__name__}: {exc}", flush=True)
-        logger.error("Error creating reminder — %s: %s", type(exc).__name__, exc, exc_info=True)
-        return f"ERROR al crear reminder: {type(exc).__name__}: {exc}"
+        logger.exception("[create_reminder] unexpected error — %s: %s", type(exc).__name__, exc)
+        return f"Error inesperado creando el reminder ({type(exc).__name__}: {exc})"
 
 
 @tool
 def cancel_reminder(reminder_id: str) -> str:
     """Cancela un reminder activo por su ID.
 
-    Siempre lista los reminders con list_reminders primero y confirma con el usuario
-    cuál desea cancelar antes de llamar esta tool.
+    Siempre llamá list_reminders primero y confirmá con el usuario cuál cancelar.
     """
+    logger.info("[cancel_reminder] called — id=%s", reminder_id)
     try:
         _cancel_reminder(reminder_id)
-        logger.info("Reminder cancelled: %s", reminder_id)
         return f"Reminder {reminder_id} cancelado."
     except Exception as exc:
-        logger.error("Error cancelling reminder %s: %s", reminder_id, exc)
-        return "No pude cancelar el reminder. Intentá de nuevo."
+        logger.exception("[cancel_reminder] failed — id=%s", reminder_id)
+        return f"No pude cancelar el reminder ({type(exc).__name__}: {exc})"
 
 
 @tool
@@ -92,22 +95,26 @@ def confirm_reminder(reminder_id: str) -> str:
     """Marca un reminder como completado cuando el usuario confirma que realizó la tarea.
 
     Llamá esta tool cuando el usuario responda afirmativamente a un reminder pendiente.
-    Si hay varios reminders pendientes, siempre preguntá cuál antes de llamar.
+    Si hay varios reminders pendientes, preguntá cuál antes de llamar.
     """
+    logger.info("[confirm_reminder] called — id=%s", reminder_id)
     try:
         _confirm_reminder(reminder_id)
-        logger.info("Reminder confirmed: %s", reminder_id)
         return f"Reminder {reminder_id} marcado como completado."
     except Exception as exc:
-        logger.error("Error confirming reminder %s: %s", reminder_id, exc)
-        return "No pude confirmar el reminder. Intentá de nuevo."
+        logger.exception("[confirm_reminder] failed — id=%s", reminder_id)
+        return f"No pude confirmar el reminder ({type(exc).__name__}: {exc})"
 
 
 @tool
 def list_reminders() -> str:
     """Lista todos los reminders activos del usuario (pending, awaiting_confirmation, awaiting_followup_confirmation)."""
+    logger.info("[list_reminders] called")
     try:
         wa_number = config.WA_NUMBER
+        if not wa_number:
+            return "WA_NUMBER no está configurado."
+
         reminders = list_active_reminders(wa_number)
         if not reminders:
             return "No tenés reminders activos."
@@ -119,19 +126,20 @@ def list_reminders() -> str:
             lines.append(f"- [{r['id']}] {r['description']} | {scheduled} | {r['status']}")
         return "\n".join(lines)
     except Exception as exc:
-        logger.error("Error listing reminders: %s", exc)
-        return "No pude obtener los reminders. Intentá de nuevo."
+        logger.exception("[list_reminders] failed")
+        return f"No pude obtener los reminders ({type(exc).__name__}: {exc})"
 
 
 @tool
 def close_conversation_tool(conversation_id: str, reason: str = "") -> str:
     """Cierra una conversacion activa cuando el usuario se despide o confirma que no necesita mas ayuda."""
+    logger.info("[close_conversation_tool] called — id=%s", conversation_id)
     try:
         _close_conversation(conversation_id, reason or None)
         return "Conversacion cerrada."
     except Exception as exc:
-        logger.error("Error cerrando conversacion: %s", exc)
-        return "No pude cerrar la conversacion en este momento."
+        logger.exception("[close_conversation_tool] failed — id=%s", conversation_id)
+        return f"No pude cerrar la conversacion ({type(exc).__name__}: {exc})"
 
 
 tools = [
