@@ -42,8 +42,10 @@ def create_reminder(description: str, scheduled_at: str, follow_up_minutes: int)
     """
     try:
         wa_number = config.WA_NUMBER
+        logger.info("create_reminder called — wa_number=%s scheduled_at=%s follow_up_minutes=%s", wa_number, scheduled_at, follow_up_minutes)
         scheduled_utc = _colombia_to_utc(scheduled_at)
         follow_up_utc = scheduled_utc + timedelta(minutes=follow_up_minutes)
+        logger.info("Parsed times — scheduled_utc=%s follow_up_utc=%s", scheduled_utc, follow_up_utc)
 
         reminder_id = _create_reminder(
             wa_number=wa_number,
@@ -63,7 +65,7 @@ def create_reminder(description: str, scheduled_at: str, follow_up_minutes: int)
             f"si no confirmás, vuelvo a preguntar a las {followup_local}."
         )
     except Exception as exc:
-        logger.error("Error creating reminder: %s", exc)
+        logger.error("Error creating reminder — %s: %s", type(exc).__name__, exc, exc_info=True)
         return "No pude crear el reminder. Intentá de nuevo."
 
 
