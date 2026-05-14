@@ -8,3 +8,4 @@ class AgentState(TypedDict):
     token_usage: Optional[Dict]
     model_id: Optional[str]
     conversation_id: Optional[str]
+    reminder_context: Optional[str]

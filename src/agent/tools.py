@@ -1,214 +1,122 @@
 import logging
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, timezone, timedelta
 
-import httpx
-import config
 from langchain_core.tools import tool
 
 from storage.conversations import close_conversation as _close_conversation
+from storage.reminders import (
+    create_reminder as _create_reminder,
+    cancel_reminder as _cancel_reminder,
+    confirm_reminder as _confirm_reminder,
+    list_active_reminders,
+)
+import config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-
-class ClickUpError(Exception):
-    def __init__(self, user_message: str):
-        super().__init__(user_message)
-        self.user_message = user_message
-
-def _headers() -> dict:
-    token = config.CLICK_UP_API_TOKEN
-    if not token:
-        raise ClickUpError("No tengo configurado el token de ClickUp.")
-    return {"Authorization": token}
+# UTC-5 offset for Colombia (Bogotá)
+_COLOMBIA_OFFSET = timedelta(hours=-5)
 
 
-def _base_url() -> str:
-    base_url = config.CLICK_UP_BASE_URL
-    if not base_url:
-        raise ClickUpError("No tengo configurado el base URL de ClickUp.")
-    return base_url.rstrip("/")
-
-
-def _resolve_list_id(list_id: Optional[str]) -> str:
-    resolved = list_id or config.CLICKUP_LIST_ID
-    if not resolved:
-        raise ClickUpError("No tengo configurado el list id de ClickUp.")
-    return resolved
-
-
-def _parse_due_date(value: Optional[str]) -> Optional[int]:
-    if value is None or value == "":
-        return None
-
-    if isinstance(value, int):
-        return value
-
-    if isinstance(value, str):
-        stripped = value.strip()
-        if stripped.isdigit():
-            return int(stripped)
-        try:
-            parsed = datetime.fromisoformat(stripped)
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return int(parsed.timestamp() * 1000)
-        except ValueError:
-            raise ClickUpError(
-                "Formato de fecha invalido. Usa ISO 8601 (YYYY-MM-DD o YYYY-MM-DDTHH:MM:SS)."
-            )
-
-    raise ClickUpError("Formato de fecha invalido.")
-
-def _request(method: str, endpoint: str, **kwargs) -> dict:
-    url = f"{_base_url()}{endpoint}"
-    headers = _headers()
-    try:
-        response = httpx.request(method, url, headers=headers, timeout=15.0, **kwargs)
-        response.raise_for_status()
-        if not response.content:
-            return {}
-        return response.json()
-    except httpx.TimeoutException:
-        raise ClickUpError("ClickUp tardó demasiado en responder.")
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "HTTP error ClickUp: %s - %s",
-            exc.response.status_code,
-            exc.response.text,
-        )
-        raise ClickUpError("ClickUp respondió con un error. Intenta de nuevo.")
-    except httpx.RequestError as exc:
-        logger.error(f"Network error ClickUp: {exc}")
-        raise ClickUpError("No pude comunicarme con ClickUp en este momento.")
-    except ValueError:
-        raise ClickUpError("Respuesta invalida de ClickUp.")
-@tool
-def get_tasks() -> str:
-    """Fetch tasks from ClickUp."""
-    try:
-        list_id = _resolve_list_id(None)
-        response = _request("GET", f"/list/{list_id}/task")
-        tasks = response.get("tasks", [])
-        result = [f"[task id:{t['id']}] task name: {t['name']} — status: {t['status']['status']}" for t in tasks]
-
-        logger.info(f"Tasks retrieved successfully: {len(tasks)} tasks found.")
-        logger.info(f"Tasks details: {result}")
-        if not result:
-            return "Dile a johan que no se encontraron tareas en click up."
-        return "\n".join(result)
-    except ClickUpError as exc:
-        return exc.user_message
-    except Exception as e:
-        logger.error(f"Error fetching tasks: {e}")
-        return "Hubo un error al tratar de obtener las tareas."
+def _colombia_to_utc(iso_colombia: str) -> datetime:
+    """Parse ISO 8601 datetime in Colombia time (UTC-5) and return UTC datetime."""
+    naive = datetime.fromisoformat(iso_colombia.strip())
+    colombia_tz = timezone(_COLOMBIA_OFFSET)
+    if naive.tzinfo is None:
+        aware = naive.replace(tzinfo=colombia_tz)
+    else:
+        aware = naive
+    return aware.astimezone(timezone.utc)
 
 
 @tool
-def create_task(
-    name: str,
-    description: str = "",
-    due_date: Optional[str] = None,
-    priority: Optional[int] = None,
-    list_id: Optional[str] = None,
-) -> str:
-    """Crea una nueva tarea en ClickUp con el nombre y descripción indicados.
-    Úsala cuando el usuario quiera agregar, crear o registrar una nueva tarea."""
-    try:
-        resolved_list_id = _resolve_list_id(list_id)
-        body = {"name": name, "description": description}
-        parsed_due_date = _parse_due_date(due_date)
-        if parsed_due_date is not None:
-            body["due_date"] = parsed_due_date
-        if priority is not None:
-            if priority not in {1, 2, 3, 4}:
-                raise ClickUpError("La prioridad debe ser 1, 2, 3 o 4.")
-            body["priority"] = priority
+def create_reminder(description: str, scheduled_at: str, follow_up_minutes: int) -> str:
+    """Crea un recordatorio inteligente.
 
-        response = _request("POST", f"/list/{resolved_list_id}/task", json=body)
-        task_id = response.get("id")
-        logger.info(f"Task created successfully. ID: {task_id}, Name: {name}")
-        return f"Tarea creada exitosamente. ID: {task_id}, Nombre: {name}"
-    except ClickUpError as exc:
-        return exc.user_message
-    except Exception as e:
-        logger.error(f"Error creating task: {e}")
-        return "Hubo un error al tratar de crear la tarea."
-
-
-@tool
-def update_task(
-    task_id: str,
-    name: Optional[str] = None,
-    description: Optional[str] = None,
-    status: Optional[str] = None,
-    due_date: Optional[str] = None,
-    priority: Optional[int] = None,
-) -> str:
-    """Actualiza una tarea existente en ClickUp. Puede cambiar el nombre, la descripción
-    y/o el estado (valores válidos: 'Open', 'in progress', 'complete').
-    Úsala cuando el usuario quiera modificar, renombrar, completar o cambiar el estado
-    de una tarea. El task_id se obtiene primero con get_tasks."""
-    try:
-        body = {
-            k: v
-            for k, v in {"name": name, "description": description, "status": status}.items()
-            if v is not None and v != ""
-        }
-        parsed_due_date = _parse_due_date(due_date)
-        if parsed_due_date is not None:
-            body["due_date"] = parsed_due_date
-        if priority is not None:
-            if priority not in {1, 2, 3, 4}:
-                raise ClickUpError("La prioridad debe ser 1, 2, 3 o 4.")
-            body["priority"] = priority
-
-        if not body:
-            return "No recibí cambios para aplicar en la tarea."
-
-        _request("PUT", f"/task/{task_id}", json=body)
-        return f"Tarea {task_id} actualizada exitosamente."
-    except ClickUpError as exc:
-        return exc.user_message
-    except Exception as e:
-        logger.error(f"Error updating task: {e}")
-        return "Error tratando de actualizar la tarea."
-
-@tool
-def get_task_details(task_id: str) -> str:
-    """Obtiene toda la información detallada de una tarea específica en ClickUp, 
-    incluyendo su descripción completa, etiquetas y subtareas.
-    Úsala cuando necesites entender el contexto profundo de una tarea antes de modificarla."""
-    try:
-        response = _request("GET", f"/task/{task_id}")
-        desc = response.get("description") or "Sin descripción"
-        tags = [tag.get("name") for tag in response.get("tags", []) if tag.get("name")]
-        logger.info(f"Task details retrieved successfully. ID: {task_id}, Name: {response.get('name')}")
-        return f"Tarea {task_id}: {response.get('name')}\nDescripción: {desc}\nEtiquetas: {', '.join(tags) if tags else 'Ninguna'}"
-    except ClickUpError as exc:
-        return exc.user_message
-    except Exception as e:
-        logger.error(f"Error fetching task details: {e}")
-        return "Error tratando de obtener los detalles de la tarea."
-
-
-@tool
-def delete_task(task_id: str) -> str:
-    """Usa esta tool para eliminar una tarea en clickup, siempre deberas pasar el task id , sino lo conoces
-    primero debes usar get_tasks para obtener el id de la tarea que quieres eliminar.
+    Args:
+        description: Qué debe recordar el usuario. Ej: "enviar el presupuesto".
+        scheduled_at: Hora del recordatorio en formato ISO 8601, hora Colombia (UTC-5).
+                      Ej: "2025-05-14T15:00:00". Siempre confirma AM/PM antes de llamar.
+        follow_up_minutes: Minutos después del disparo inicial para el follow-up si no confirma.
     """
     try:
-        logger.info(f"Attempting to delete task. ID: {task_id}")
+        wa_number = config.WA_NUMBER
+        scheduled_utc = _colombia_to_utc(scheduled_at)
+        follow_up_utc = scheduled_utc + timedelta(minutes=follow_up_minutes)
 
-        _request("DELETE", f"/task/{task_id}")
-        logger.info(f"Task deleted successfully. ID: {task_id}")
-        return f"Tarea {task_id} eliminada exitosamente."
-    except ClickUpError as exc:
-        return exc.user_message
-    except Exception as e:
-        logger.error(f"Error deleting task: {e}")
-        return "Error tratando de eliminar la tarea."
+        reminder_id = _create_reminder(
+            wa_number=wa_number,
+            description=description,
+            scheduled_at_utc=scheduled_utc,
+            follow_up_at_utc=follow_up_utc,
+        )
+
+        colombia_tz = timezone(_COLOMBIA_OFFSET)
+        scheduled_local = scheduled_utc.astimezone(colombia_tz).strftime("%I:%M %p")
+        followup_local = follow_up_utc.astimezone(colombia_tz).strftime("%I:%M %p")
+
+        logger.info("Reminder created: %s", reminder_id)
+        return (
+            f"Reminder creado (ID: {reminder_id}). "
+            f"Te pregunto a las {scheduled_local}; "
+            f"si no confirmás, vuelvo a preguntar a las {followup_local}."
+        )
+    except Exception as exc:
+        logger.error("Error creating reminder: %s", exc)
+        return "No pude crear el reminder. Intentá de nuevo."
+
+
+@tool
+def cancel_reminder(reminder_id: str) -> str:
+    """Cancela un reminder activo por su ID.
+
+    Siempre lista los reminders con list_reminders primero y confirma con el usuario
+    cuál desea cancelar antes de llamar esta tool.
+    """
+    try:
+        _cancel_reminder(reminder_id)
+        logger.info("Reminder cancelled: %s", reminder_id)
+        return f"Reminder {reminder_id} cancelado."
+    except Exception as exc:
+        logger.error("Error cancelling reminder %s: %s", reminder_id, exc)
+        return "No pude cancelar el reminder. Intentá de nuevo."
+
+
+@tool
+def confirm_reminder(reminder_id: str) -> str:
+    """Marca un reminder como completado cuando el usuario confirma que realizó la tarea.
+
+    Llamá esta tool cuando el usuario responda afirmativamente a un reminder pendiente.
+    Si hay varios reminders pendientes, siempre preguntá cuál antes de llamar.
+    """
+    try:
+        _confirm_reminder(reminder_id)
+        logger.info("Reminder confirmed: %s", reminder_id)
+        return f"Reminder {reminder_id} marcado como completado."
+    except Exception as exc:
+        logger.error("Error confirming reminder %s: %s", reminder_id, exc)
+        return "No pude confirmar el reminder. Intentá de nuevo."
+
+
+@tool
+def list_reminders() -> str:
+    """Lista todos los reminders activos del usuario (pending, awaiting_confirmation, awaiting_followup_confirmation)."""
+    try:
+        wa_number = config.WA_NUMBER
+        reminders = list_active_reminders(wa_number)
+        if not reminders:
+            return "No tenés reminders activos."
+
+        colombia_tz = timezone(_COLOMBIA_OFFSET)
+        lines = []
+        for r in reminders:
+            scheduled = datetime.fromisoformat(r["scheduled_at"]).astimezone(colombia_tz).strftime("%d/%m %I:%M %p")
+            lines.append(f"- [{r['id']}] {r['description']} | {scheduled} | {r['status']}")
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.error("Error listing reminders: %s", exc)
+        return "No pude obtener los reminders. Intentá de nuevo."
 
 
 @tool
@@ -218,15 +126,14 @@ def close_conversation_tool(conversation_id: str, reason: str = "") -> str:
         _close_conversation(conversation_id, reason or None)
         return "Conversacion cerrada."
     except Exception as exc:
-        logger.error(f"Error cerrando conversacion: {exc}")
+        logger.error("Error cerrando conversacion: %s", exc)
         return "No pude cerrar la conversacion en este momento."
 
-# Register all available tools
+
 tools = [
-    get_tasks,
-    create_task,
-    update_task,
-    get_task_details,
-    delete_task,
+    create_reminder,
+    cancel_reminder,
+    confirm_reminder,
+    list_reminders,
     close_conversation_tool,
 ]

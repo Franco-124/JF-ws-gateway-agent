@@ -21,13 +21,11 @@ def _call_model(state: AgentState) -> dict:
     conversation_id = state.get("conversation_id")
     if conversation_id:
         messages.append(
-            SystemMessage(
-                content=(
-                    "ID de conversacion actual: "
-                    f"{conversation_id}. Usa este id al llamar la tool close_conversation_tool."
-                )
-            )
+            SystemMessage(content=f"ID de conversacion actual: {conversation_id}.")
         )
+    reminder_context = state.get("reminder_context")
+    if reminder_context:
+        messages.append(SystemMessage(content=reminder_context))
     messages += state["messages"]
     response = _model.invoke(messages)
     token_usage = getattr(response, "usage_metadata", None)

@@ -45,6 +45,32 @@ create table if not exists message_dedup (
 
 create index if not exists message_dedup_created_at_idx
   on message_dedup (created_at);
+
+create table if not exists reminders (
+  id uuid primary key default gen_random_uuid(),
+  wa_number text not null,
+  description text not null,
+  scheduled_at timestamptz not null,
+  follow_up_at timestamptz not null,
+  follow_up_sent_at timestamptz,
+  status text not null default 'pending' check (
+    status in (
+      'pending',
+      'awaiting_confirmation',
+      'awaiting_followup_confirmation',
+      'confirmed',
+      'cancelled',
+      'closed_unconfirmed'
+    )
+  ),
+  created_at timestamptz default now()
+);
+
+create index if not exists reminders_wa_status_idx
+  on reminders (wa_number, status);
+
+create index if not exists reminders_scheduled_at_idx
+  on reminders (scheduled_at) where status = 'pending';
 """
 
 

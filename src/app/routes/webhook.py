@@ -6,21 +6,44 @@ from storage.conversation_log import log_message
 from storage.conversation_history import fetch_conversation_messages
 from storage.message_dedup import register_message_id
 from storage.conversations import get_or_create_conversation
+from storage.reminders import get_pending_reminders
 from config import VERIFY_TOKEN
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _invoke_agent(message: str, conversation_id: str) -> tuple[str, dict, str]:
+def _build_reminder_context(pending: list[dict]) -> str:
+    lines = ["Reminders pendientes de confirmación del usuario:"]
+    for r in pending:
+        lines.append(f"- ID: {r['id']} | Tarea: {r['description']} | Estado: {r['status']}")
+    lines.append(
+        "Si el mensaje del usuario es una respuesta a alguno de estos reminders, "
+        "interpretalo y llamá confirm_reminder con el ID correspondiente. "
+        "Si hay varios y no queda claro a cuál responde, preguntá antes de confirmar."
+    )
+    return "\n".join(lines)
+
+
+def _invoke_agent(message: str, conversation_id: str, wa_number: str) -> tuple[str, dict, str]:
     history = fetch_conversation_messages(conversation_id)
     prior_messages = [
         {"role": "user" if item["direction"] == "in" else "assistant", "content": item["body"]}
         for item in history
         if item.get("direction") in {"in", "out"}
     ]
-    payload = {"messages": prior_messages + [{"role": "user", "content": message}]}
-    result = graph.invoke({**payload, "conversation_id": conversation_id})
+
+    pending_reminders = get_pending_reminders(wa_number)
+    extra_context = _build_reminder_context(pending_reminders) if pending_reminders else None
+
+    payload = {
+        "messages": prior_messages + [{"role": "user", "content": message}],
+        "conversation_id": conversation_id,
+    }
+    if extra_context:
+        payload["reminder_context"] = extra_context
+
+    result = graph.invoke(payload)
     content = result["messages"][-1].content
     token_usage = result.get("token_usage") or {}
     model_id = result.get("model_id") or "unknown"
@@ -75,7 +98,7 @@ async def handle_messages(request: Request):
             body=text,
         )
 
-        respuesta, token_usage, model_id = _invoke_agent(text, conversation_id)
+        respuesta, token_usage, model_id = _invoke_agent(text, conversation_id, number)
         send_message(number, respuesta)
         log_message(
             conversation_id=conversation_id,

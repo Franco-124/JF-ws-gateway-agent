@@ -6,7 +6,8 @@
       "Bash(venv/Scripts/python.exe -m pip install fastapi uvicorn)",
       "Bash(pip3 install *)",
       "Bash(rm -rf venv)",
-      "Bash(python -m virtualenv venv)"
+      "Bash(python -m virtualenv venv)",
+      "Bash(uv sync *)"
     ]
   }
 }
