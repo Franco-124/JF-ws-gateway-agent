@@ -1,4 +1,3 @@
-
 # ws-gateway
 
 Gateway para WhatsApp que recibe mensajes por webhook, ejecuta un agente LLM con
