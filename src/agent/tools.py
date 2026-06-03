@@ -68,13 +68,31 @@ def create_reminder(description: str, scheduled_at: str, follow_up_minutes: int)
         language_code = getattr(config, "TEMPLATE_LANGUAGE_CODE", "es")
         user_name = getattr(config, "TEMPLATE_USER_NAME", "Juan Carlos")
         
-        _send_template(
+
+        template_rsp = _send_template(
             to=wa_number,
             template_name=template_name,
             language_code=language_code,
             user_name=user_name,
         )
 
+        if not template_rsp.get("success"):
+            
+            # Create the reminder but log the failure to send the template
+            logger.error("[create_reminder] failed to send template — id=%s response=%s", reminder_id, template_rsp)
+            try:
+                _create_reminder(
+                    wa_number=wa_number,
+                    description=description,
+                    scheduled_at_utc=scheduled_utc,
+                    follow_up_at_utc=follow_up_utc,
+                )
+                return f"Reminder creado con exito, Descripción: '{description}', Hora programada: {scheduled_local}, Hora de follow-up: {followup_local}."
+            
+            except Exception as exc:
+                logger.exception("[create_reminder] failed to create reminder after template failure — id=%s", reminder_id)
+                return f"Error creando el reminder después de fallar al enviar la plantilla ({type(exc).__name__}: {exc})"
+            
         logger.info("[create_reminder] success — id=%s", reminder_id)
         return (
             f"Reminder guardado como borrador (ID: {reminder_id}) esperando confirmación. "

@@ -42,31 +42,42 @@ def send_template(
     language_code: str,
     user_name: str,
 ) -> dict:
-    url = f"{FACEBOOK_BASE_URL}/{PHONE_ID}/messages"
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": to,
-        "type": "template",
-        "template": {
-            "name": template_name,
-            "language": {
-                "code": language_code
-            },
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": [
-                        {
-                            "type": "text",
-                            "text": user_name
-                        }
-                    ]
-                }
-            ]
+    try:
+        url = f"{FACEBOOK_BASE_URL}/{PHONE_ID}/messages"
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": to,
+            "type": "template",
+            "template": {
+                "name": template_name,
+                "language": {
+                    "code": language_code
+                },
+                "components": [
+                    {
+                        "type": "body",
+                        "parameters": [
+                            {
+                                "type": "text",
+                                "text": user_name
+                            }
+                        ]
+                    }
+                ]
+            }
         }
-    }
-    response = requests.post(url, json=payload, headers=_headers())
-    logger.info(f"send_template to={to} name={template_name} status={response.status_code} response={response.text}")
-    return response.json()
+        response = requests.post(url, json=payload, headers=_headers())
+        logger.info(f"send_template to={to} name={template_name} status={response.status_code} response={response.text}")
+        return {
+            "success": True,
+            "status_code": response.status_code,
+            "response": response.json()
+        }
 
+    except Exception as exc:
+        logger.error(f"Error trying to send template message: {exc}")
+        return {
+            "success": False,
+            "error": str(exc)
+        }
