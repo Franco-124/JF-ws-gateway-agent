@@ -20,3 +20,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 # WhatsApp number of the owner (used for proactive reminders)
 WA_NUMBER = os.getenv("WA_NUMBER")
+
+# Template settings
+TEMPLATE_NAME = os.getenv("TEMPLATE_NAME", "enviar_confirmacion_recordatorio")
+TEMPLATE_LANGUAGE_CODE = os.getenv("TEMPLATE_LANGUAGE_CODE", "es")
+TEMPLATE_USER_NAME = os.getenv("TEMPLATE_USER_NAME", "Juan Carlos")
+

@@ -34,3 +34,39 @@ def mark_as_read(message_id: str) -> dict:
     response = requests.post(url, json=payload, headers=_headers())
     logger.info(f"mark_as_read id={message_id} status={response.status_code}")
     return response.json()
+
+
+def send_template(
+    to: str,
+    template_name: str,
+    language_code: str,
+    user_name: str,
+) -> dict:
+    url = f"{FACEBOOK_BASE_URL}/{PHONE_ID}/messages"
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {
+                "code": language_code
+            },
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {
+                            "type": "text",
+                            "text": user_name
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+    response = requests.post(url, json=payload, headers=_headers())
+    logger.info(f"send_template to={to} name={template_name} status={response.status_code} response={response.text}")
+    return response.json()
+

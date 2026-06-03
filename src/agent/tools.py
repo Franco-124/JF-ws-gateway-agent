@@ -10,6 +10,7 @@ from storage.reminders import (
     confirm_reminder as _confirm_reminder,
     list_active_reminders,
 )
+from whatsapp.client import send_template as _send_template
 import config
 
 logger = logging.getLogger(__name__)
@@ -61,11 +62,23 @@ def create_reminder(description: str, scheduled_at: str, follow_up_minutes: int)
         scheduled_local = scheduled_utc.astimezone(colombia_tz).strftime("%I:%M %p")
         followup_local = follow_up_utc.astimezone(colombia_tz).strftime("%I:%M %p")
 
+        logger.info("[create_reminder] sending template — id=%s", reminder_id)
+        # Send WhatsApp template
+        template_name = getattr(config, "TEMPLATE_NAME", "NOMBRE_DE_TU_PLANTILLA")
+        language_code = getattr(config, "TEMPLATE_LANGUAGE_CODE", "es")
+        user_name = getattr(config, "TEMPLATE_USER_NAME", "Juan Carlos")
+        
+        _send_template(
+            to=wa_number,
+            template_name=template_name,
+            language_code=language_code,
+            user_name=user_name,
+        )
+
         logger.info("[create_reminder] success — id=%s", reminder_id)
         return (
-            f"Reminder creado (ID: {reminder_id}). "
-            f"Te pregunto a las {scheduled_local}; "
-            f"si no confirmás, vuelvo a preguntar a las {followup_local}."
+            f"Reminder guardado como borrador (ID: {reminder_id}) esperando confirmación. "
+            f"Se le ha enviado al usuario la plantilla de WhatsApp para Confirmar o Rechazar la creación de la tarea."
         )
     except ValueError as exc:
         logger.error("[create_reminder] validation error — %s", exc)

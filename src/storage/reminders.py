@@ -4,6 +4,8 @@ from typing import Any
 
 from storage.supabase_client import get_supabase_client
 
+from typing import Any, Optional, Dict
+
 logger = logging.getLogger(__name__)
 
 _TABLE = "reminders"
@@ -26,7 +28,7 @@ def create_reminder(
         "description": description,
         "scheduled_at": scheduled_at_utc.isoformat(),
         "follow_up_at": follow_up_at_utc.isoformat(),
-        "status": "pending",
+        "status": "pending_creation",
     }
     logger.info("Inserting reminder — wa_number=%s description=%r scheduled_at=%s", wa_number, description, scheduled_at_utc)
     result = client.table(_TABLE).insert(row).execute()
@@ -37,6 +39,25 @@ def create_reminder(
     reminder_id = result.data[0]["id"]
     logger.info("Reminder inserted — id=%s", reminder_id)
     return reminder_id
+
+
+def get_latest_pending_creation(wa_number: str) -> Optional[Dict[str, Any]]:
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_TABLE)
+            .select("*")
+            .eq("wa_number", wa_number)
+            .eq("status", "pending_creation")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception:
+        logger.exception("get_latest_pending_creation failed for wa_number=%s", wa_number)
+        return None
+
 
 
 def get_pending_reminders(wa_number: str) -> list[dict]:

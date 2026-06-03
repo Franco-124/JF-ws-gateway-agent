@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Request, Response
 from agent.graph import graph
 from whatsapp.client import send_message, mark_as_read
@@ -6,8 +7,8 @@ from storage.conversation_log import log_message
 from storage.conversation_history import fetch_conversation_messages
 from storage.message_dedup import register_message_id
 from storage.conversations import get_or_create_conversation
-from storage.reminders import get_pending_reminders
-from config import VERIFY_TOKEN
+from storage.reminders import get_pending_reminders, get_latest_pending_creation, update_reminder_status
+import config
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -58,7 +59,7 @@ async def verify_webhook(request: Request):
     token = params.get("hub.verify_token")
     challenge = params.get("hub.challenge")
 
-    if mode == "subscribe" and token == VERIFY_TOKEN:
+    if mode == "subscribe" and token == config.VERIFY_TOKEN:
         logger.info("Webhook verificado exitosamente")
         return Response(
             content=str(challenge),
@@ -75,21 +76,104 @@ async def handle_messages(request: Request):
     data = await request.json()
 
     try:
-        messages = data["entry"][0]["changes"][0]["value"].get("messages")
+        value_data = data["entry"][0]["changes"][0]["value"]
+        
+        # Extract user profile name dynamically from contacts payload
+        contacts = value_data.get("contacts")
+        if contacts:
+            profile_name = contacts[0].get("profile", {}).get("name")
+            if profile_name:
+                config.TEMPLATE_USER_NAME = profile_name
+                logger.info(f"Updated dynamic TEMPLATE_USER_NAME: {profile_name}")
+
+        messages = value_data.get("messages")
         if not messages:
             return Response(content="EVENT_RECEIVED", status_code=200)
 
         message = messages[0]
         number = message["from"]
         message_id = message["id"]
-        text = message["text"]["body"]
         conversation_id = get_or_create_conversation(number)
 
         if not register_message_id(message_id, number):
             return Response(content="EVENT_RECEIVED", status_code=200)
 
-        logger.info(f"Mensaje de {number}: {text}")
+        # Parse message type and body safely
+        msg_type = message.get("type", "text")
+        if msg_type == "text":
+            text = message.get("text", {}).get("body", "")
+        elif msg_type == "button":
+            button_data = message.get("button", {})
+            text = button_data.get("payload") or button_data.get("text", "")
+        else:
+            text = ""
 
+        logger.info(f"Mensaje de {number} (tipo {msg_type}): {text}")
+
+        # Check for button confirmation / rejection flow
+        if msg_type == "button":
+            button_payload = text.strip().lower()
+            if button_payload in {"confirmar", "confirm"}:
+                reminder = get_latest_pending_creation(number)
+                if reminder:
+                    update_reminder_status(reminder["id"], "pending")
+                    try:
+                        scheduled_utc = datetime.fromisoformat(reminder["scheduled_at"])
+                        colombia_tz = timezone(timedelta(hours=-5))
+                        scheduled_local = scheduled_utc.astimezone(colombia_tz).strftime("%I:%M %p")
+                    except Exception:
+                        scheduled_local = reminder["scheduled_at"]
+                    respuesta = f"¡Excelente! Tu recordatorio sobre '{reminder['description']}' ha sido programado para las {scheduled_local}."
+                else:
+                    respuesta = "No encontré ningún recordatorio pendiente de confirmación."
+
+                mark_as_read(message_id)
+                log_message(
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    wa_number=number,
+                    direction="in",
+                    body=f"[Botón: {text}]",
+                )
+                send_message(number, respuesta)
+                log_message(
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    wa_number=number,
+                    direction="out",
+                    body=respuesta,
+                    model_id="system_button_action",
+                )
+                return Response(content="EVENT_RECEIVED", status_code=200)
+
+            elif button_payload in {"rechazar", "reject"}:
+                reminder = get_latest_pending_creation(number)
+                if reminder:
+                    update_reminder_status(reminder["id"], "cancelled")
+                    respuesta = f"Listo, he cancelado la creación del recordatorio: '{reminder['description']}'."
+                else:
+                    respuesta = "No encontré ningún recordatorio pendiente de confirmación."
+
+                mark_as_read(message_id)
+                log_message(
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    wa_number=number,
+                    direction="in",
+                    body=f"[Botón: {text}]",
+                )
+                send_message(number, respuesta)
+                log_message(
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    wa_number=number,
+                    direction="out",
+                    body=respuesta,
+                    model_id="system_button_action",
+                )
+                return Response(content="EVENT_RECEIVED", status_code=200)
+
+        # Standard message flow
         mark_as_read(message_id)
         log_message(
             conversation_id=conversation_id,
